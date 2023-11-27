@@ -27,7 +27,7 @@ public class ReleaseHistoryDTO extends BaseDTO{
 
   private String clusterName;
 
-  private String namespaceName;
+  //private String namespaceName;
 
   private String branchName;
 
