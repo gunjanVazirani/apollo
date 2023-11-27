@@ -30,7 +30,7 @@ public class NamespaceDTO extends BaseDTO{
       regexp = InputValidator.CLUSTER_NAMESPACE_VALIDATOR,
       message = "Invalid Namespace format: " + InputValidator.INVALID_CLUSTER_NAMESPACE_MESSAGE
   )
-  private String namespaceName;
+  //private String namespaceName;
 
   public long getId() {
     return id;
