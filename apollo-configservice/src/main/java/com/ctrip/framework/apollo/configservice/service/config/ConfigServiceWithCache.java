@@ -16,6 +16,7 @@
  */
 package com.ctrip.framework.apollo.configservice.service.config;
 
+import com.ctrip.framework.apollo.Apollo;
 import com.ctrip.framework.apollo.biz.grayReleaseRule.GrayReleaseRulesHolder;
 import com.ctrip.framework.apollo.biz.config.BizConfig;
 import com.google.common.base.Strings;
@@ -163,8 +164,7 @@ public class ConfigServiceWithCache extends AbstractConfigService {
     ConfigCacheEntry cacheEntry = configCache.getUnchecked(cacheKey);
 
     //cache is out-dated
-    if (clientMessages != null && clientMessages.has(messageKey) &&
-        clientMessages.get(messageKey) > cacheEntry.getNotificationId()) {
+    if (test(clientMessages,messageKey,cacheEntry)) {
       //invalidate the cache and try to load from db again
       invalidate(cacheKey);
       cacheEntry = configCache.getUnchecked(cacheKey);
@@ -173,6 +173,10 @@ public class ConfigServiceWithCache extends AbstractConfigService {
     return cacheEntry.getRelease();
   }
 
+  public static boolean test(ApolloNotificationMessages clientMessages, String messageKey, ConfigCacheEntry cacheEntry){
+    return clientMessages != null && clientMessages.has(messageKey) &&
+            clientMessages.get(messageKey) > cacheEntry.getNotificationId();
+  }
   private void invalidate(String key) {
     configCache.invalidate(key);
     Tracer.logEvent(TRACER_EVENT_CACHE_INVALIDATE, key);
