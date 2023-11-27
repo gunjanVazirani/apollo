@@ -23,6 +23,8 @@ public class BaseDTO {
 
   protected String dataChangeCreatedBy;
 
+  protected String namespaceName;
+
   protected String dataChangeLastModifiedBy;
 
   protected String dataChangeCreatedByDisplayName;
