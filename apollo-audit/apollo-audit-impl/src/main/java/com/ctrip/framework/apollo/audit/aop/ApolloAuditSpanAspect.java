@@ -61,16 +61,9 @@ public class ApolloAuditSpanAspect {
         Object arg = args[i];
         Annotation[] annotations = method.getParameterAnnotations()[i];
         if (Arrays.stream(annotations).anyMatch(anno -> anno instanceof ApolloAuditLogDataInfluence)) {
-          String entityName = null;
-          String fieldName = null;
-          for(int j = 0; j < annotations.length; j++) {
-            if(annotations[j] instanceof ApolloAuditLogDataInfluenceTable) {
-              entityName = ((ApolloAuditLogDataInfluenceTable) annotations[j]).tableName();
-            }
-            if(annotations[j] instanceof ApolloAuditLogDataInfluenceTableField) {
-              fieldName = ((ApolloAuditLogDataInfluenceTableField) annotations[j]).fieldName();
-            }
-          }
+          String[] strings= entityAndField(annotations);
+          String entityName = strings[0];
+          String fieldName = strings[1];
           if (entityName != null && fieldName != null) {
             String matchedValue = String.valueOf(arg);
             api.appendDataInfluence("AnyMatched", entityName, fieldName, matchedValue);
@@ -79,6 +72,23 @@ public class ApolloAuditSpanAspect {
       }
       return pjp.proceed();
     }
+  }
+
+  public static String[] entityAndField(Annotation[] annotations){
+    String[] strings = new String[2];
+    String entityName;
+    String fieldName;
+    for(int j = 0; j < annotations.length; j++) {
+      if(annotations[j] instanceof ApolloAuditLogDataInfluenceTable) {
+        entityName = ((ApolloAuditLogDataInfluenceTable) annotations[j]).tableName();
+        strings[0]=entityName;
+      }
+      if(annotations[j] instanceof ApolloAuditLogDataInfluenceTableField) {
+        fieldName = ((ApolloAuditLogDataInfluenceTableField) annotations[j]).fieldName();
+        strings[1]=fieldName;
+      }
+    }
+    return strings;
   }
 
   Method findMethod(Class<?> clazz, String methodName) {
