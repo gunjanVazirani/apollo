@@ -14,210 +14,90 @@
  * limitations under the License.
  *
  */
-package com.ctrip.framework.apollo.configservice.service.config;
+package com.ctrip.framework.apollo.audit.aop;
 
-import com.ctrip.framework.apollo.Apollo;
-import com.ctrip.framework.apollo.biz.grayReleaseRule.GrayReleaseRulesHolder;
-import com.ctrip.framework.apollo.biz.config.BizConfig;
-import com.google.common.base.Strings;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
-import com.google.common.collect.Lists;
+import com.ctrip.framework.apollo.audit.annotation.ApolloAuditLog;
+import com.ctrip.framework.apollo.audit.annotation.ApolloAuditLogDataInfluence;
+import com.ctrip.framework.apollo.audit.annotation.ApolloAuditLogDataInfluenceTable;
+import com.ctrip.framework.apollo.audit.annotation.ApolloAuditLogDataInfluenceTableField;
+import com.ctrip.framework.apollo.audit.api.ApolloAuditLogApi;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Objects;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Pointcut;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
-import com.ctrip.framework.apollo.biz.entity.Release;
-import com.ctrip.framework.apollo.biz.entity.ReleaseMessage;
-import com.ctrip.framework.apollo.biz.message.Topics;
-import com.ctrip.framework.apollo.biz.service.ReleaseMessageService;
-import com.ctrip.framework.apollo.biz.service.ReleaseService;
-import com.ctrip.framework.apollo.biz.utils.ReleaseMessageKeyGenerator;
-import com.ctrip.framework.apollo.core.ConfigConsts;
-import com.ctrip.framework.apollo.core.dto.ApolloNotificationMessages;
-import com.ctrip.framework.apollo.tracer.Tracer;
-import com.ctrip.framework.apollo.tracer.spi.Transaction;
+@Aspect
+public class ApolloAuditSpanAspect {
 
-import java.util.Optional;
+  private final ApolloAuditLogApi api;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-
-import javax.annotation.PostConstruct;
-import org.springframework.util.CollectionUtils;
-
-/**
- * config service with guava cache
- *
- * @author Jason Song(song_s@ctrip.com)
- */
-public class ConfigServiceWithCache extends AbstractConfigService {
-  private static final Logger logger = LoggerFactory.getLogger(ConfigServiceWithCache.class);
-  private static final long DEFAULT_EXPIRED_AFTER_ACCESS_IN_MINUTES = 60;//1 hour
-  private static final String TRACER_EVENT_CACHE_INVALIDATE = "ConfigCache.Invalidate";
-  private static final String TRACER_EVENT_CACHE_LOAD = "ConfigCache.LoadFromDB";
-  private static final String TRACER_EVENT_CACHE_LOAD_ID = "ConfigCache.LoadFromDBById";
-  private static final String TRACER_EVENT_CACHE_GET = "ConfigCache.Get";
-  private static final String TRACER_EVENT_CACHE_GET_ID = "ConfigCache.GetById";
-
-  private final ReleaseService releaseService;
-  private final ReleaseMessageService releaseMessageService;
-  private final BizConfig bizConfig;
-
-  private LoadingCache<String, ConfigCacheEntry> configCache;
-
-  private LoadingCache<Long, Optional<Release>> configIdCache;
-
-  private ConfigCacheEntry nullConfigCacheEntry;
-
-  public ConfigServiceWithCache(final ReleaseService releaseService,
-      final ReleaseMessageService releaseMessageService,
-      final GrayReleaseRulesHolder grayReleaseRulesHolder,
-      final BizConfig bizConfig) {
-    super(grayReleaseRulesHolder);
-    this.releaseService = releaseService;
-    this.releaseMessageService = releaseMessageService;
-    this.bizConfig = bizConfig;
-    nullConfigCacheEntry = new ConfigCacheEntry(ConfigConsts.NOTIFICATION_ID_PLACEHOLDER, null);
+  public ApolloAuditSpanAspect(ApolloAuditLogApi api) {
+    this.api = api;
   }
 
-  @PostConstruct
-  void initialize() {
-    configCache = CacheBuilder.newBuilder()
-        .expireAfterAccess(DEFAULT_EXPIRED_AFTER_ACCESS_IN_MINUTES, TimeUnit.MINUTES)
-        .build(new CacheLoader<String, ConfigCacheEntry>() {
-          @Override
-          public ConfigCacheEntry load(String key) throws Exception {
-            List<String> namespaceInfo = ReleaseMessageKeyGenerator.messageToList(key);
-            if (CollectionUtils.isEmpty(namespaceInfo)) {
-              Tracer.logError(
-                  new IllegalArgumentException(String.format("Invalid cache load key %s", key)));
-              return nullConfigCacheEntry;
-            }
+  @Pointcut("@annotation(auditLog)")
+  public void setAuditSpan(ApolloAuditLog auditLog) {
+  }
 
-            Transaction transaction = Tracer.newTransaction(TRACER_EVENT_CACHE_LOAD, key);
-            try {
-              ReleaseMessage latestReleaseMessage = releaseMessageService.findLatestReleaseMessageForMessages(Lists
-                  .newArrayList(key));
-              Release latestRelease = releaseService.findLatestActiveRelease(namespaceInfo.get(0), namespaceInfo.get(1),
-                  namespaceInfo.get(2));
+  @Around(value = "setAuditSpan(auditLog)")
+  public Object around(ProceedingJoinPoint pjp, ApolloAuditLog auditLog) throws Throwable {
+    String opName = auditLog.name();
+    if (opName.equals("") && RequestContextHolder.getRequestAttributes() != null) {
+      ServletRequestAttributes servletRequestAttributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+      opName = servletRequestAttributes.getRequest().getRequestURI();
+    }
 
-              transaction.setStatus(Transaction.SUCCESS);
-
-              long notificationId = latestReleaseMessage == null ? ConfigConsts.NOTIFICATION_ID_PLACEHOLDER : latestReleaseMessage
-                  .getId();
-
-              if (notificationId == ConfigConsts.NOTIFICATION_ID_PLACEHOLDER && latestRelease == null) {
-                return nullConfigCacheEntry;
-              }
-
-              return new ConfigCacheEntry(notificationId, latestRelease);
-            } catch (Throwable ex) {
-              transaction.setStatus(ex);
-              throw ex;
-            } finally {
-              transaction.complete();
-            }
+    try (AutoCloseable scope = api.appendAuditLog(auditLog.type(), opName,
+        auditLog.description())) {
+      Object[] args = pjp.getArgs();
+      Method method = findMethod(pjp.getTarget().getClass(), pjp.getSignature().getName());
+      for (int i = 0; i < args.length; i++) {
+        Object arg = args[i];
+        Annotation[] annotations = method.getParameterAnnotations()[i];
+        if (Arrays.stream(annotations).anyMatch(anno -> anno instanceof ApolloAuditLogDataInfluence)) {
+          String[] strings= entityAndField(annotations);
+          String entityName = strings[0];
+          String fieldName = strings[1];
+          if (entityName != null && fieldName != null) {
+            String matchedValue = String.valueOf(arg);
+            api.appendDataInfluence("AnyMatched", entityName, fieldName, matchedValue);
           }
-        });
-    configIdCache = CacheBuilder.newBuilder()
-        .expireAfterAccess(DEFAULT_EXPIRED_AFTER_ACCESS_IN_MINUTES, TimeUnit.MINUTES)
-        .build(new CacheLoader<Long, Optional<Release>>() {
-          @Override
-          public Optional<Release> load(Long key) throws Exception {
-            Transaction transaction = Tracer.newTransaction(TRACER_EVENT_CACHE_LOAD_ID, String.valueOf(key));
-            try {
-              Release release = releaseService.findActiveOne(key);
-
-              transaction.setStatus(Transaction.SUCCESS);
-
-              return Optional.ofNullable(release);
-            } catch (Throwable ex) {
-              transaction.setStatus(ex);
-              throw ex;
-            } finally {
-              transaction.complete();
-            }
-          }
-        });
-  }
-
-  @Override
-  protected Release findActiveOne(long id, ApolloNotificationMessages clientMessages) {
-    Tracer.logEvent(TRACER_EVENT_CACHE_GET_ID, String.valueOf(id));
-    return configIdCache.getUnchecked(id).orElse(null);
-  }
-
-  @Override
-  protected Release findLatestActiveRelease(String appId, String clusterName, String namespaceName,
-                                            ApolloNotificationMessages clientMessages) {
-    String messageKey = ReleaseMessageKeyGenerator.generate(appId, clusterName, namespaceName);
-    String cacheKey = messageKey;
-
-    if (bizConfig.isConfigServiceCacheKeyIgnoreCase()) {
-      cacheKey = cacheKey.toLowerCase();
-    }
-
-    Tracer.logEvent(TRACER_EVENT_CACHE_GET, cacheKey);
-
-    ConfigCacheEntry cacheEntry = configCache.getUnchecked(cacheKey);
-
-    //cache is out-dated
-    if (test(clientMessages,messageKey,cacheEntry)) {
-      //invalidate the cache and try to load from db again
-      invalidate(cacheKey);
-      cacheEntry = configCache.getUnchecked(cacheKey);
-    }
-
-    return cacheEntry.getRelease();
-  }
-
-  public static boolean test(ApolloNotificationMessages clientMessages, String messageKey, ConfigCacheEntry cacheEntry){
-    return clientMessages != null && clientMessages.has(messageKey) &&
-            clientMessages.get(messageKey) > cacheEntry.getNotificationId();
-  }
-  private void invalidate(String key) {
-    configCache.invalidate(key);
-    Tracer.logEvent(TRACER_EVENT_CACHE_INVALIDATE, key);
-  }
-
-  @Override
-  public void handleMessage(ReleaseMessage message, String channel) {
-    logger.info("message received - channel: {}, message: {}", channel, message);
-    if (!Topics.APOLLO_RELEASE_TOPIC.equals(channel) || Strings.isNullOrEmpty(message.getMessage())) {
-      return;
-    }
-
-    try {
-      String messageKey = message.getMessage();
-      if (bizConfig.isConfigServiceCacheKeyIgnoreCase()) {
-        messageKey = messageKey.toLowerCase();
+        }
       }
-      invalidate(messageKey);
-
-      //warm up the cache
-      configCache.getUnchecked(messageKey);
-    } catch (Throwable ex) {
-      //ignore
+      return pjp.proceed();
     }
   }
 
-  private static class ConfigCacheEntry {
-    private final long notificationId;
-    private final Release release;
-
-    public ConfigCacheEntry(long notificationId, Release release) {
-      this.notificationId = notificationId;
-      this.release = release;
+  public static String[] entityAndField(Annotation[] annotations){
+    String[] strings = new String[2];
+    String entityName;
+    String fieldName;
+    for(int j = 0; j < annotations.length; j++) {
+      if(annotations[j] instanceof ApolloAuditLogDataInfluenceTable) {
+        entityName = ((ApolloAuditLogDataInfluenceTable) annotations[j]).tableName();
+        strings[0]=entityName;
+      }
+      if(annotations[j] instanceof ApolloAuditLogDataInfluenceTableField) {
+        fieldName = ((ApolloAuditLogDataInfluenceTableField) annotations[j]).fieldName();
+        strings[1]=fieldName;
+      }
     }
-
-    public long getNotificationId() {
-      return notificationId;
-    }
-
-    public Release getRelease() {
-      return release;
-    }
+    return strings;
   }
+
+  Method findMethod(Class<?> clazz, String methodName) {
+    for (Method method : clazz.getDeclaredMethods()) {
+      if (method.getName().equals(methodName)) {
+        return method;
+      }
+    }
+    return null;
+  }
+
 }
