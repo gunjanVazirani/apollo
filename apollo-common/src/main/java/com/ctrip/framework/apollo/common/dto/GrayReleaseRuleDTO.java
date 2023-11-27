@@ -27,7 +27,7 @@ public class GrayReleaseRuleDTO extends BaseDTO {
 
   private String clusterName;
 
-  private String namespaceName;
+  //private String namespaceName;
 
   private String branchName;
 
