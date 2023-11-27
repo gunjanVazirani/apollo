@@ -78,8 +78,9 @@ public class AdditionalUserInfoEnrichServiceImpl implements AdditionalUserInfoEn
     }
   }
 
-  private <T> List<UserInfoEnrichedAdapter> adapt(List<? extends T> dtoList,
-      Function<? super T, ? extends UserInfoEnrichedAdapter> mapper) {
+  @Override
+  public <T> List<UserInfoEnrichedAdapter> adapt(List<? extends T> dtoList,
+                                                 Function<? super T, ? extends UserInfoEnrichedAdapter> mapper) {
     List<UserInfoEnrichedAdapter> adapterList = new ArrayList<>(dtoList.size());
     for (T dto : dtoList) {
       if (dto == null) {
@@ -91,7 +92,8 @@ public class AdditionalUserInfoEnrichServiceImpl implements AdditionalUserInfoEn
     return adapterList;
   }
 
-  private <T> Set<String> extractOperatorId(List<UserInfoEnrichedAdapter> adapterList) {
+  @Override
+  public <T> Set<String> extractOperatorId(List<UserInfoEnrichedAdapter> adapterList) {
     Set<String> operatorIdSet = new HashSet<>();
     for (UserInfoEnrichedAdapter adapter : adapterList) {
       if (StringUtils.hasText(adapter.getFirstUserId())) {
